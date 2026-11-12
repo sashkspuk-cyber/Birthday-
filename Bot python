@@ -1,0 +1,267 @@
+import io
+import logging
+from aiogram import Bot, Dispatcher, F, Router
+from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import (
+    BufferedInputFile,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
+from PIL import Image, ImageDraw, ImageFont
+
+# Вставь сюда токен своего бота от @BotFather
+TOKEN = "ТОКЕН_ТВОЕГО_БОТА"
+
+router = Router()
+logging.basicConfig(level=logging.INFO)
+
+
+# Состояния для выбора имени
+class GuestState(StatesGroup):
+  choosing_name = State()
+
+
+# Генератор уникальных онлайн-билетов с помощью Pillow
+def generate_ticket(name: str, guest_type: str) -> bytes:
+  # Размеры билета
+  width, height = 900, 450
+  image = Image.new("RGB", (width, height))
+  draw = ImageDraw.Draw(image)
+
+  # Настройка стилей в зависимости от гостя
+  if guest_type == "zakhar":
+    # Захар: Черно-желтый стиль + отсылки на холодильник (синий) и Роблокс
+    bg_color = (20, 20, 20)  # Глубокий графит
+    accent_color = (255, 215, 0)  # Ярко-желтый
+    secondary_color = (0, 120, 255)  # Синий (холодильник)
+    accent_text = "ROBLOX VIBES & CHILL"
+  else:
+    # Адилет: Сине-голубой стиль + отсылки
+    bg_color = (10, 25, 45)  # Темно-синий
+    accent_color = (0, 191, 255)  # Голубой / Неон
+    secondary_color = (255, 140, 0)  # Акцентный оранжевый
+    accent_text = "CYBERPUNK & BLUE"
+
+  # Заливка фона
+  draw.rectangle([0, 0, width, height], fill=bg_color)
+
+  # Декоративные рамки и элементы (имитация билета / пропуска)
+  draw.rectangle([20, 20, width - 20, height - 20], outline=accent_color, width=3)
+  # Линия отрыва билета
+  for y in range(40, height - 40, 15):
+    draw.line([(width - 150, y), (width - 150, y + 8)], fill=accent_color, width=2)
+
+  # Текст на билете (используем стандартный шрифт или дефолтный)
+  try:
+    font_title = ImageFont.truetype("arial.ttf", 28)
+    font_name = ImageFont.truetype("arial.ttf", 36)
+    font_small = ImageFont.truetype("arial.ttf", 16)
+  except:
+    font_title = ImageFont.load_default()
+    font_name = ImageFont.load_default()
+    font_small = ImageFont.load_default()
+
+  # Заголовок
+  draw.text((50, 45), "LEVEL 14 // BIRTHDAY PASS", fill=accent_color)
+  draw.text((50, 85), f"GUEST: {name.upper()}", fill=(255, 255, 255))
+
+  # Метаданные билета
+  draw.text((50, 150), "DATE: 22 НОЯБРЯ | 14:00", fill=(200, 200, 200))
+  draw.text((50, 180), "LOCATION: СЕКРЕТНЫЙ ШТАБ", fill=(200, 200, 200))
+
+  # Пасхалки и отсылки на билете
+  draw.text((50, 250), f"SPECIAL CODE: {accent_text}", fill=secondary_color)
+  draw.text((50, 280), "EASTERS: [Nirvana] [Mortal Kombat] [Paleontology]", fill=(150, 150, 150))
+  draw.text((50, 310), "SYSTEM: Blue Fridge & Roblox Verified", fill=(150, 150, 150))
+
+  # Правая часть билета (отрывной корешок)
+  draw.text((width - 130, 100), "VIP", fill=accent_color)
+  draw.text((width - 130, 200), "PASS", fill=(255, 255, 255))
+  draw.text((width - 130, 300), "№ 001", fill=secondary_color)
+
+  # Сохраняем картинку в байты для отправки в Telegram
+  bio = io.BytesIO()
+  image.save(bio, "PNG")
+  bio.seek(0)
+  return bio.getvalue()
+
+
+# Главное меню выбора имени
+@router.message(CommandStart())
+async def cmd_start(message: Message, state: FSMContext):
+  keyboard = InlineKeyboardMarkup(
+      inline_keyboard=[
+          [
+              InlineKeyboardButton(
+                  text="Я — Захар 🟡⬛", callback_data="name_zakhar"
+              )
+          ],
+          [
+              InlineKeyboardButton(
+                  text="Я — Адилет 🔵🔷", callback_data="name_adilet"
+              )
+          ],
+      ]
+  )
+  await message.answer(
+      "Йо! Добро пожаловать в систему пропуска на мой 14-й день рождения. 🎮\n\n"
+      "Кем из приглашенных ты являешься?",
+      reply_markup=keyboard,
+  )
+  await state.set_state(GuestState.choosing_name)
+
+
+# Обработка выбора Захара
+@router.callback_query(
+    GuestState.choosing_name, F.data.in_(["name_zakhar", "name_adilet"])
+)
+async def process_name(callback: CallbackQuery, state: FSMContext):
+  is_zakhar = callback.data == "name_zakhar"
+  name = "Захар" if is_zakhar else "Адилет"
+  guest_type = "zakhar" if is_zakhar else "adilet"
+
+  await state.update_data(name=name, guest_type=guest_type)
+
+  # Генерируем билет
+  ticket_bytes = generate_ticket(name, guest_type)
+  photo = BufferedInputFile(ticket_bytes, filename=f"ticket_{guest_type}.png")
+
+  # Кнопки под билетом
+  keyboard = InlineKeyboardMarkup(
+      inline_keyboard=[
+          [
+              InlineKeyboardButton(
+                  text="🎁 Выбор подарка", callback_data="gift_ideas"
+              )
+          ],
+          [
+              InlineKeyboardButton(
+                  text="🖨 Предложить распечатать", callback_data="print_offer"
+              )
+          ],
+          [
+              InlineKeyboardButton(
+                  text="✅ Подтвердить участие", callback_data="confirm_yes"
+              )
+          ],
+      ]
+  )
+
+  await callback.message.answer_photo(
+      photo=photo,
+      caption=(
+          f"Эй, **{name}**! Твой персональный цифровой пропуск готов. ⚡\n\n"
+          "Здесь зашифрованы все нужные вайбы: музыка, игры и атмосфера.\n"
+          "Жду тебя **22 ноября в 14:00**!"
+      ),
+      reply_markup=keyboard,
+  )
+  await callback.answer()
+
+
+# Меню идей подарков (с твоими пожеланиями 😈)
+@router.callback_query(F.data == "gift_ideas")
+async def show_gifts(callback: CallbackQuery):
+  gifts_text = (
+      "🎁 **Идеи для подарков (выбирай на свой вкус):**\n\n"
+      "🐉 **Mortal Kombat:** Всё, что связано с файтингами, символикой или мерчем.\n"
+      "🦴 **Палеонтология:** Крутые модели, артефакты, интересные штуки про древний мир.\n"
+      "🎸 **Nirvana:** Музыкальный мерч, плакаты, пластинки или атрибутика рок-группы.\n"
+      "💡 **Освещение:** Неоновые лампы, крутая подсветка для комнаты или светодиодные ленты.\n"
+      "⚡ **Электроника:** Полезные гаджеты, аксессуары или девайсы.\n"
+      "💸 **Деньги:** Классика, которая никогда не подводит (чтобы прокачать сетап или купить нужную вещь). 😈"
+  )
+
+  back_keyboard = InlineKeyboardMarkup(
+      inline_keyboard=[
+          [InlineKeyboardButton(text="◀️ Назад к билету", callback_data="back_to_ticket")]
+      ]
+  )
+  await callback.message.edit_caption(
+      caption=gifts_text, reply_markup=back_keyboard
+  )
+  await callback.answer()
+
+
+# Предложение распечатать (ненавязчиво)
+@router.callback_query(F.data == "print_offer")
+async def print_offer(callback: CallbackQuery):
+  print_text = (
+      "🖨 **Насчет печати:**\n\n"
+      "Кстати, этот билет можно при желании распечатать на плотной бумаге дома или в копицентре — получится реальный бумажный пропуск на тусовку, который прикольно оставить на память. Но это по желанию, цифровой в телефоне тоже работает на 100%! 😎"
+  )
+  back_keyboard = InlineKeyboardMarkup(
+      inline_keyboard=[
+          [InlineKeyboardButton(text="◀️ Назад к билету", callback_data="back_to_ticket")]
+      ]
+  )
+  await callback.message.edit_caption(
+      caption=print_text, reply_markup=back_keyboard
+  )
+  await callback.answer()
+
+
+# Кнопка возврата к билету
+@router.callback_query(F.data == "back_to_ticket")
+async def back_to_ticket(callback: CallbackQuery, state: FSMContext):
+  data = await state.get_data()
+  name = data.get("name", "Гость")
+  guest_type = data.get("guest_type", "zakhar")
+
+  ticket_bytes = generate_ticket(name, guest_type)
+  photo = BufferedInputFile(ticket_bytes, filename="ticket.png")
+
+  keyboard = InlineKeyboardMarkup(
+      inline_keyboard=[
+          [
+              InlineKeyboardButton(
+                  text="🎁 Выбор подарка", callback_data="gift_ideas"
+              )
+          ],
+          [
+              InlineKeyboardButton(
+                  text="🖨 Предложить распечатать", callback_data="print_offer"
+              )
+          ],
+          [
+              InlineKeyboardButton(
+                  text="✅ Подтвердить участие", callback_data="confirm_yes"
+              )
+          ],
+      ]
+  )
+
+  await callback.message.edit_media(
+      media=InputMediaPhoto(
+          media=photo, caption=f"Твой пропуск, **{name}**! Жду 22 ноября в 14:00."
+      ),
+      reply_markup=keyboard,
+  )
+  await callback.answer()
+
+
+# Подтверждение участия
+@router.callback_query(F.data == "confirm_yes")
+async def confirm_attendance(callback: CallbackQuery):
+  await callback.answer("Отлично! Жду тебя на тусовке! 🔥", show_alert=True)
+
+
+# Запуск бота
+async def main():
+  bot = Bot(token=TOKEN)
+  dp = Dispatcher(storage=MemoryStorage())
+  dp.include_router(router)
+  await bot.delete_webhook(drop_pending_updates=True)
+  print("Бот успешно запущен и ждет гостей!")
+  await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+  import asyncio
+
+  async io.run(main())
